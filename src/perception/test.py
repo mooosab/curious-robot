@@ -1,47 +1,41 @@
-from gz.transport13 import Node
-from gz.msgs10.laserscan_pb2 import LaserScan
+"""LiDAR live anzeigen: python3 src/perception/test.py"""
+
 import time
 
-
-lidar_data = []
+if __package__:
+    from .lidar import analyze_scan, format_scan
+else:
+    from lidar import analyze_scan, format_scan
 
 
 def lidar_callback(msg):
-    global lidar_data
-
-    # LiDAR-Daten in normale Python-Liste umwandeln
-    lidar_data = list(msg.ranges)
-
-    # Bestimmte Richtungen auslesen
-    front = lidar_data[180]
-    right = lidar_data[90]
-    left = lidar_data[270]
-    back = lidar_data[0]
-    left_front = lidar_data[225]
-    right_front = lidar_data[135]
-    back_left = lidar_data[315]
-    back_right = lidar_data[45]
-
-    print(
-        f"Vorne: {front:.2f} m | "
-        f"Links: {left:.2f} m | "
-        f"Rechts: {right:.2f} m | "
-        f"Hinten: {back:.2f} m |\n"
-        f"Links vorne: {left_front:.2f} m | "
-        f"Rechts vorne: {right_front:.2f} m"
-        f"Hinten links: {back_left:.2f} m | "
-        f"Hinten rechts: {back_right:.2f} m"
-    )
+    try:
+        results = analyze_scan(
+            msg.ranges, msg.range_min, msg.range_max,
+            msg.angle_min, msg.angle_step,
+        )
+    except ValueError as error:
+        print(f"\nScan nicht auswertbar: {error}. Hindernisstatus: UNBEKANNT.")
+        return
+    print(format_scan(results))
 
 
-node = Node()
+def main():
+    # Gazebo wird nur für den Live-Empfang benötigt, nicht für die Tests.
+    from gz.transport13 import Node
+    from gz.msgs10.laserscan_pb2 import LaserScan
 
-node.subscribe(
-    LaserScan,
-    "/model/curious_robot/lidar",
-    lidar_callback
-)
+    node = Node()
+    if not node.subscribe(LaserScan, "/model/curious_robot/lidar", lidar_callback):
+        raise RuntimeError("LiDAR-Topic konnte nicht abonniert werden")
+
+    print("Warte auf LiDAR-Daten ... Beenden mit Ctrl+C.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nLiDAR-Anzeige beendet.")
 
 
-while True:
-    time.sleep(1)
+if __name__ == "__main__":
+    main()

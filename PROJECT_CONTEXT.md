@@ -132,17 +132,20 @@ Current relevant structure:
     ├── src/
     │   ├── navigation/
     │   ├── perception/
+    │   │   ├── lidar.py
     │   │   └── test.py
     │   ├── memory/
     │   └── brain/
     │
     ├── config/
     └── tests/
+        └── test_perception.py
 
 `src/perception/test.py` is the current LiDAR reception experiment.
 The `navigation`, `memory`, and `brain` directories exist but are empty;
-`config` and `tests` are also empty. No Python navigation, Brain or Memory
-implementation has been started.
+`config` is also empty. `tests/test_perception.py` contains standard-library
+unit tests for perception. No Python navigation, Brain or Memory implementation
+has been started.
 
 
 ## 7. Current Simulation World
@@ -308,9 +311,9 @@ Already working:
 
 Session 1 status: world working, stable robot working, differential drive working,
 LiDAR working, and Python LiDAR subscription and conversion to a list working.
-The owner has confirmed reception through the Python bindings. The current saved
-script extracts and prints eight individual directions. Angular-sector processing
-is in progress and is not complete; see section 13 for the exact state.
+The owner has confirmed reception through the Python bindings. Perception now
+computes minimum distances and obstacle status for eight angular sectors, handles
+invalid measurements, and has ten passing unit tests; see section 13.
 Python navigation and autonomous obstacle avoidance have not been started.
 Brain and Memory have not been started. ROS 2 is not in use.
 
@@ -319,48 +322,79 @@ Brain and Memory have not been started. ROS 2 is not in use.
 
 ### Current perception state
 
-`src/perception/test.py` imports `Node` from `gz.transport13` and `LaserScan`
-from `gz.msgs10.laserscan_pb2`. It subscribes to `/model/curious_robot/lidar`
-with `node.subscribe(LaserScan, "/model/curious_robot/lidar", lidar_callback)`.
-The callback receives the LaserScan data and converts its 361 ranges into a
-normal Python list with `lidar_data = list(msg.ranges)`. A sleeping loop keeps
-the subscriber process alive. This is a perception experiment, not a robot
-movement controller.
+The code is split into two small modules:
 
-The eight directions and their zero-based indices have been understood and
-are read by the current saved script:
+- `src/perception/lidar.py`: sector evaluation, scan validation and table formatting;
+  no Gazebo imports or side effects.
+- `src/perception/test.py`: live subscription to `/model/curious_robot/lidar`,
+  callback and `main()` entry point. Gazebo bindings are imported only at startup.
+  The callback passes sensor range limits and horizontal angle metadata to the
+  evaluator. Invalid scans produce an explicit unknown-status message.
 
-| Direction | Index | Angle relative to forward |
-|---|---|---|
-| Front (vorne) | 180 | 0 degrees |
-| Front-left (vorne-links) | 225 | +45 degrees |
-| Left (links) | 270 | +90 degrees |
-| Back-left (hinten-links) | 315 | +135 degrees |
-| Back (hinten) | 0 (also 360) | -180 degrees (also +180 degrees) |
-| Back-right (hinten-rechts) | 45 | -135 degrees |
-| Right (rechts) | 90 | -90 degrees |
-| Front-right (vorne-rechts) | 135 | -45 degrees |
+The existing sector boundaries and strict obstacle threshold of 2.5 m are preserved:
 
-The owner has begun replacing individual directions with angular sectors.
-The current front-sector example is `lidar_data[170:191]`: indices 170 through
-190 inclusive, covering -10 through +10 degrees around forward (21 values).
-This describes the current learning/work-in-progress state reported by the
-owner. At this documentation update, the saved `test.py` still uses individual
-indices, including `lidar_data[180]`; the sector slice is not yet in that file.
+| Sector | Python slice(s) |
+|---|---|
+| Front | `[158:203]` |
+| Front-left | `[203:248]` |
+| Left | `[248:293]` |
+| Back-left | `[293:338]` |
+| Back | `[338:361] + [0:23]` |
+| Back-right | `[23:68]` |
+| Right | `[68:113]` |
+| Front-right | `[113:158]` |
 
-### Next steps — not completed
+For this scan, index 180 points forward, 225 front-left, 270 left, 315 back-left,
+0/360 backward, 45 back-right, 90 right, and 135 front-right. Indices 0 and 360
+represent the same direction and remain included in the rear sector.
 
-1. Continue replacing individual direction samples with angular sectors.
-2. Process the sector values, for example by determining a minimum with `min()`.
-3. Handle measurements robustly, including incomplete/empty data, invalid values
-   and non-finite ranges.
-4. Develop obstacle detection from the processed sectors.
+Measurement handling:
 
-Sector aggregation, robust measurement handling and obstacle detection are not
-finished and are not implemented in the current saved script. Python navigation,
-autonomous obstacle avoidance, Brain and Memory remain unstarted. The owner wants
-to write and understand the Python code themselves; documentation of these next
-steps does not authorize their automatic implementation.
+- Finite values within the message's `range_min` / `range_max` are accepted.
+- Positive infinity means no return within range, not a measured finite distance.
+- NaN, negative infinity, zero, negative values, out-of-range values and nonnumeric
+  entries are excluded and counted per sector.
+- A valid distance below 2.5 m produces `JA`, even with other invalid values.
+- Without a detected near obstacle, invalid/missing sector values produce
+  `UNBEKANNT` rather than a false clear indication.
+- Fully valid sectors without a near obstacle produce `NEIN`. At exactly 2.5 m,
+  the strict threshold does not classify the return as a near obstacle.
+- Missing distances display `--`; all-no-return sectors display `kein Treffer`.
+- Scans must have 361 samples and the expected -pi start / one-degree step.
+  Invalid range limits or incompatible layouts are rejected, without reusing
+  earlier results. The next valid scan can still be processed.
+
+The table shows all eight sectors with minimum distance, obstacle status and
+invalid-value count. `NEIN` applies only to the current sector measurements and
+threshold; it is not a navigation or path-clearance decision. No stale-data
+watchdog is implemented: an old terminal table is not proof of a current scan.
+
+Run the live display from the repository root:
+
+```bash
+python3 src/perception/test.py
+```
+
+Run the tests without Gazebo or additional dependencies:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+Ten tests cover invalid values, missing data, infinity, sensor and obstacle
+boundaries, all sector edges including the rear wrap, invalid scan metadata,
+output formatting and callback recovery. These are synthetic-data tests; the
+refactored live subscriber has not been revalidated against a running simulation.
+The `python3` interpreter in the editing shell could not import `gz` during the
+import check (`ModuleNotFoundError`). Use the owner's existing Python environment
+with the working Gazebo bindings for live reception; no dependencies were installed.
+
+### Next steps — not implemented
+
+Review the perception output manually with the running simulation before adding
+further behavior. Python navigation, autonomous obstacle avoidance, Brain and
+Memory remain unstarted. No movement commands, ROS 2, dependencies or simulation
+changes were introduced by the perception restructuring.
 
 ### Existing simulation and raw-data test reference
 
@@ -387,7 +421,7 @@ Angles are radians relative to the scanner: 0 is forward, positive is left.
 `angle_min` / `angle_max` bound the scan; `angle_step` is the angular spacing.
 `range_min` / `range_max` bound measurable distances. An infinite range means
 no return within the measurable range, not an obstacle at zero distance.
-The direction-to-index mapping is listed above.
+The direction indices and sector slices are listed above.
 The single vertical slice may report `vertical_angle_step: nan`; the horizontal
 angle step and range data are valid, and no vertical stepping is needed.
 

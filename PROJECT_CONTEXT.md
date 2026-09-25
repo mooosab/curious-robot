@@ -260,9 +260,10 @@ We are currently working on:
 
 The purpose of Session 1 is ONLY to establish the physical robot and basic autonomous navigation.
 
-The simulation hardware is working. The current development focus is learning
-to process LiDAR data in Python, progressing from individual directions to
-angular sectors. Autonomous navigation remains a later, unstarted step.
+The simulation hardware is working. Python perception now evaluates eight
+angular sectors, handles invalid measurements and displays obstacle status.
+The current focus is understanding and manually checking this tested perception
+code. Autonomous navigation remains a later, unstarted step.
 
 Do NOT add:
 
@@ -375,7 +376,38 @@ Run the live display from the repository root:
 python3 src/perception/test.py
 ```
 
-Run the tests without Gazebo or additional dependencies:
+Start the Gazebo server and GUI separately as described in section 4 and press
+Run before expecting live scans. Use a third terminal with the Python environment
+that has the Gazebo bindings installed.
+
+Live data flow:
+
+1. Gazebo publishes a `gz.msgs.LaserScan` on `/model/curious_robot/lidar` at
+   approximately 10 Hz in simulation time.
+2. The subscription invokes `lidar_callback(msg)` whenever a message arrives.
+3. `analyze_scan()` checks the scan and calls `evaluate_sector()` for each sector.
+4. `format_scan()` builds the table; the callback prints it to the terminal.
+
+Each received scan appends a new table; the display does not overwrite the
+previous table or clear the terminal. The `while True` loop with `time.sleep(1)`
+only keeps the subscriber alive: it does not poll the sensor or set the scan rate.
+Ctrl+C ends the Python display while Gazebo continues running. Pausing Gazebo or
+losing the scan stream leaves the last table visible without a stale-data warning.
+The display only receives data and prints results; it sends no movement commands.
+
+### Automated perception tests
+
+`tests/test_perception.py` uses Python's built-in `unittest`. It generates synthetic
+measurements, calls the perception functions and compares their results with
+expected values. It does not subscribe to a real sensor, launch Gazebo or move
+the robot. Importing the live-display module for the callback tests does not run
+`main()` or import the Gazebo bindings.
+
+For example, sector values `[4.0, NaN]` must produce a distance of 4.0 m,
+an unknown obstacle status and one invalid measurement. This checks that a
+missing measurement cannot silently become a clear-sector decision.
+
+Run the tests from the repository root without Gazebo or additional dependencies:
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -384,6 +416,8 @@ python3 -m unittest discover -s tests -v
 Ten tests cover invalid values, missing data, infinity, sensor and obstacle
 boundaries, all sector edges including the rear wrap, invalid scan metadata,
 output formatting and callback recovery. These are synthetic-data tests; the
+last execution passed all ten tests (`Ran 10 tests ... OK`). They verify the
+processing logic, not the live transport connection or simulator behavior. The
 refactored live subscriber has not been revalidated against a running simulation.
 The `python3` interpreter in the editing shell could not import `gz` during the
 import check (`ModuleNotFoundError`). Use the owner's existing Python environment

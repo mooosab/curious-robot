@@ -61,7 +61,8 @@ Current:
 - Git / GitHub
 - Gazebo Harmonic
 - SDF
-- Python for initial LiDAR perception experiments
+- Python for LiDAR perception, reactive navigation and world-pose/path tracking
+- Matplotlib for offline trajectory plots
 - working Python bindings for `gz.transport13` and `gz.msgs10` (confirmed by the owner)
 
 Planned:
@@ -103,7 +104,7 @@ Before starting Gazebo, the resource path is currently set using:
 
 Current development branch:
 
-    feature/session-01-basic-simulation
+    feature/session-03-localization
 
 Development should happen incrementally on feature branches.
 
@@ -130,6 +131,12 @@ Current relevant structure:
     │           └── model.sdf
     │
     ├── src/
+    │   ├── localization/
+    │   │   ├── __init__.py
+    │   │   ├── pose.py
+    │   │   ├── path.py
+    │   │   ├── record.py
+    │   │   └── plot.py
     │   ├── navigation/
     │   │   ├── navigation.py
     │   │   └── movement.py
@@ -141,13 +148,16 @@ Current relevant structure:
     │
     ├── config/
     └── tests/
+        ├── test_localization.py
+        ├── test_localization_plot.py
         ├── test_navigation.py
         └── test_perception.py
 
-`src/perception/test.py` is the current LiDAR reception experiment.
-The owner has added `src/navigation/navigation.py` and `movement.py` for basic
-reactive driving. `memory`, `brain` and `config` remain empty. Tests cover both
-perception and navigation with the standard-library `unittest` framework.
+`src/perception/test.py` displays live LiDAR data. Navigation and movement are
+implemented in `src/navigation/`; localization records the simulator's model pose
+independently in `src/localization/`. `memory`, `brain` and `config` remain empty.
+Tests use `unittest`; the two plot tests use Matplotlib and skip if it is absent.
+Local `.venv/` and generated `recordings/` CSV/images are ignored by Git.
 
 
 ## 7. Current Simulation World
@@ -256,39 +266,30 @@ Opposite wheel velocities:
 
 ## 10. Current Development Session
 
-We are currently working on:
+    Session 3 – Localization & Path Tracking
 
-    Session 1 – Basic Simulation
+Sessions 1 (simulation/perception) and 2 (reactive navigation) are complete.
+The owner confirms that autonomous driving works stably in Gazebo.
+Session 3 adds simulator ground-truth x/y/yaw, sampled CSV recording and an
+offline Matplotlib trajectory plot. It does not estimate pose from LiDAR or
+wheel odometry. Localization and navigation run as separate processes.
 
-The purpose of Session 1 is ONLY to establish the physical robot and basic autonomous navigation.
-
-The simulation hardware is working. Python perception now evaluates eight
-angular sectors, handles invalid measurements and displays obstacle status.
-The owner has started basic reactive navigation. The current focus is correcting
-and manually checking its obstacle-response logic while retaining working perception.
-
-Do NOT add:
-
-- machine learning
-- reinforcement learning
-- object recognition
-- camera learning
-- LLM integration
-- personality
-- long-term memory
-
-yet.
+Stop after Session 3 for owner review. Do not add mapping, SLAM, destination
+navigation, path planning, Brain, Memory, AI or ROS 2. Do not merge into main.
 
 
-## 11. Session 1 Definition of Done
+## 11. Session 3 Definition of Done
 
-Session 1 is complete when:
+Implemented and verified:
 
-1. Gazebo world starts successfully.
-2. Differential-drive robot appears correctly.
-3. Robot can move using its wheels.
-4. LiDAR produces distance measurements.
-5. A simple Python controller can avoid obstacles autonomously.
+1. Receive the existing Gazebo model world pose from Python.
+2. Extract x/y and quaternion-derived yaw with tested conventions.
+3. Record sampled `(timestamp, x, y, yaw)` independently of navigation.
+4. Plot the trajectory with start/end points and final heading.
+5. Review navigation and make only a targeted safety fix.
+6. Run all perception, navigation, localization and plot tests successfully.
+
+Live checks and remaining manual checks are described in section 13.
 
 
 ## 12. Completed
@@ -312,19 +313,14 @@ Already working:
 - LiDAR working: raw ranges verified for walls and all three obstacles, with changes
   during driving, rotation, and a controlled near/far obstacle test
 
-Session 1 status: world working, stable robot working, differential drive working,
-LiDAR working, and Python LiDAR subscription and conversion to a list working.
-The owner has confirmed reception through the Python bindings. Perception now
-computes minimum distances and obstacle status for eight angular sectors, handles
-invalid measurements, and has ten unit tests. Their earlier successful run used
-the former 2.5-m threshold; some expectations still need adjustment for the current
-1.0-m threshold. See section 13.
-Basic Python reactive navigation has been started and its decision logic corrected.
-Reliable autonomous roaming has not yet been confirmed in a live test. Brain and
-Memory have not been started. ROS 2 is not in use.
+Session 1 and Session 2 are complete, including eight-sector perception,
+invalid-measurement handling and reactive navigation. Stable autonomous driving
+is confirmed by the owner. The 1.0-m threshold is now reflected in all tests and
+code descriptions. Session 3 adds working world-pose reception, sampling, CSV
+recording and plotting. Brain and Memory have not been started; ROS 2 is not used.
 
 
-## 13. NEXT STEP
+## 13. Current Implementation and Validation
 
 ### Current perception state
 
@@ -420,20 +416,13 @@ Run the tests from the repository root without Gazebo or additional dependencies
 python3 -m unittest discover -s tests -v
 ```
 
-Ten tests cover invalid values, missing data, infinity, sensor and obstacle
-boundaries, all sector edges including the rear wrap, invalid scan metadata,
-output formatting and callback recovery. These are synthetic-data tests; the
-earlier execution passed all ten tests with the former 2.5-m threshold. Some
-assertions still assume that threshold, so this is not a passing-test claim for
-the current 1.0-m setting. Tests were not rerun during this documentation update.
-They verify the
-processing logic, not the live transport connection or simulator behavior. The
-refactored live subscriber has not been revalidated against a running simulation.
-The `python3` interpreter in the editing shell could not import `gz` during the
-import check (`ModuleNotFoundError`). Use the owner's existing Python environment
-with the working Gazebo bindings for live reception; no dependencies were installed.
+Ten perception tests cover invalid values, missing data, infinity, sensor and
+obstacle boundaries, sector edges including the rear wrap, scan metadata,
+formatting and callback recovery. Five outdated assertions were corrected for
+the already-existing 1.0-m threshold; the perception algorithm was not changed.
+The old 2.5-m sensor-limit error message now displays the actual constant.
 
-### Current navigation and next manual test
+### Current navigation
 
 The owner introduced `src/navigation/navigation.py` and `movement.py`.
 The original decision logic moved forward while turning toward a blocked front,
@@ -466,7 +455,7 @@ The diagonal constants remain `DIAGONAL_STOP_DISTANCE = 0.6` and
 `DIAGONAL_CLEAR_DISTANCE = 0.8` in `src/navigation/navigation.py`.
 Distances refer to the smallest valid scanner-to-surface range in each sector.
 Restart the Python controller after editing these constants; Gazebo does not need
-restarting for this Python-only change. The simulation and dependencies are unchanged.
+restarting for a change to these constants. Navigation needs no new dependency.
 
 Start from the repository root in the owner's working Gazebo Python environment:
 
@@ -478,26 +467,157 @@ Run only one navigation process and avoid concurrent manual velocity publishers
 while testing. With Gazebo running, observe forward motion, in-place avoidance,
 a consistent turn direction, then resumed forward motion. Ctrl+C sends Stop.
 
-Before the owner changed the threshold, all 22 unit tests passed: 10 perception
-and 12 navigation tests. Some tests now retain outdated 2.5/2.8-m expectations
-and must be updated before the suite can validate the 1.0/1.3-m setting. The
-`choose_motion()` docstring and the sensor-limit error text also still mention
-2.5 m; those texts do not determine behavior and were not changed in this
-documentation-only update. Navigation tests
-cover the decision transitions, diagonal obstacles, unknown measurements, scan
-errors, timeout and shutdown, using synthetic scans and a mocked transport.
-No live driving verification of the corrected controller has been performed.
-The default editing-shell Python lacks `gz`; a separate Homebrew Python import
-check found the transport bindings but lacked `google.protobuf`. No dependencies
-were installed or environment configuration changed.
+Navigation review for Session 3:
 
-This remains a simple reactive experiment, not a complete collision-free planner.
-It does not check the entire swept robot footprint during rotation or solve
-trapped/corner situations. The 0.6/0.8-m diagonal margins are initial tuning values
-for manual verification. Next steps are to adapt the threshold-dependent tests
-and stale code descriptions, then verify the current settings with a live driving
-test. These steps are pending, not performed by this documentation update. Brain,
-Memory, mapping, SLAM and ROS 2 remain unimplemented.
+- Retained turn direction and 1.0/1.3-m front hysteresis are consistent. Diagonal
+  entry/release thresholds remain 0.6/0.8 m. No speed or steering change was made.
+- `analyze_scan()` removes NaN, negative infinity and other invalid ranges;
+  `choose_motion()` stops for unknown/partially invalid front sectors. Positive
+  infinity is a valid no-return reading. Tests cover these cases and recovery.
+- Callback, timeout and shutdown share a command lock. The shutdown flag prevents
+  late callbacks from moving the robot. The wall-clock timeout also works when
+  simulation time is paused. It measures receipt time, not sensor timestamp age.
+- Concrete fix: callback terminal output previously held the command lock. A
+  blocked terminal/pipe could prevent the watchdog from sending Stop. Output now
+  happens after releasing that lock. Shutdown sends Stop before printing its
+  final message. A regression test verifies that neither valid-scan nor
+  invalid-scan output holds the command lock.
+- This remains reactive sector-based avoidance. It does not check the full swept
+  footprint, monitor rear/side clearance during rotation or guarantee escape from
+  tight corners. Retaining direction can keep it turning in a trap. No recovery
+  planner or footprint model was introduced because the current controller works
+  in the owner's test world and such changes require separate tuning/testing.
+- The Python watchdog cannot stop a force-killed/frozen controller or replace a
+  broken transport connection. Gazebo retains the last command until replaced.
+  Queued old scans are not rejected by their simulation timestamp. No simulator
+  command watchdog or scan-age synchronization was added in Session 3.
+
+### Session 3: localization and path tracking
+
+Inspected on this Mac: Gazebo Sim **8.15.0** (Harmonic), `gz.transport13` and
+`gz.msgs10`. The running server advertises:
+
+    /world/basic_world/dynamic_pose/info    gz.msgs.Pose_V
+
+The world's existing SceneBroadcaster publishes this topic. No simulation or
+model file was changed and no additional PosePublisher plugin is required.
+`Pose_V.pose` contains several named entities. The extractor selects exactly
+`curious_robot`, not `chassis` or a wheel, and rejects duplicate matches. In this
+world the robot is a top-level model, so this entry is its world pose; child-link
+entries are relative to their parents. This assumption must be revisited if the
+robot is later nested inside another model. The DiffDrive odometry topic is not
+used as a substitute for world coordinates.
+
+Modules:
+
+- `pose.py`: immutable `Pose2D(timestamp, x, y, yaw)`, quaternion conversion and
+  model extraction; no Gazebo imports. Missing fields, nonfinite coordinates,
+  invalid time and zero/invalid quaternions are rejected.
+- `path.py`: `PathTracker` samples simulation time, retaining only the latest pose
+  and last sample. CSV helpers write/read `timestamp,x,y,yaw`. No Gazebo imports.
+- `record.py`: subscribes using `Node.subscribe(Pose_V, topic, callback)`, writes
+  accepted samples directly to CSV and displays current coordinates, heading,
+  simulation time, reception age and invalid-message count. Sends no velocity.
+- `plot.py`: offline Matplotlib X/Y line, green start, red end and 0.3-m final-heading
+  arrow; equal axis scale and metres. It imports Matplotlib only when plotting.
+
+Coordinates and orientation:
+
+- `x = model_pose.position.x`, `y = model_pose.position.y`, in world metres.
+- Timestamp is `message.header.stamp.sec + nsec * 1e-9`, in simulation seconds.
+- Normalize quaternion `(qx, qy, qz, qw)` before computing:
+  `yaw = atan2(2*(qw*qz + qx*qy), 1 - 2*(qy*qy + qz*qz))`.
+- Yaw is radians in [-pi, pi], positive counterclockwise around world +Z.
+  Heading 0 points along world +X; +pi/2 points along world +Y. Debug output
+  additionally converts it to degrees. This is the model origin, not the offset
+  LiDAR origin and not an odometry frame.
+
+Recording behavior:
+
+- Default interval: 0.2 simulation seconds (at most approximately five samples
+  per simulation second). First valid point is saved immediately. On normal
+  shutdown the latest unsampled point is also saved.
+- Translation is not required: turning in place records changed headings.
+- Equal timestamps, e.g. repeated paused-world messages, do not add points.
+- Invalid poses are counted and skipped; absent model entries are ignored. The
+  display's reception age and simulation timestamp help identify stalled data.
+- Backward simulation time, including a world reset, ends the recording with an
+  error and preserves previously written samples. Start a new file afterwards.
+- CSV is flushed after each sampled point; RAM usage does not grow with a trip.
+  Disk usage grows at the sampled rate. Plotting loads that file into memory.
+- Existing CSV files are never overwritten. The default name includes date/time;
+  `--output` can specify a different path. `--duration` is wall-clock seconds.
+- Ctrl+C closes/unsubscribes cleanly. Stopping the recorder does **not** stop the
+  navigation process. No valid poses produces an error and a header-only CSV.
+
+Environment and commands (from the repository root):
+
+A local ignored `.venv` was created using Homebrew Python 3.14.7 with
+`--system-site-packages`, so it can use the installed Python-3.14 Gazebo bindings.
+Protobuf 7.36.2 and Matplotlib 3.11.2 plus Matplotlib's required dependencies were
+installed into that venv. No global package or shell configuration was changed.
+The generated installed gz-msgs files require a compatible Protobuf runtime.
+The default pyenv Python 3.11.8 still lacks `gz`; use the venv for live commands.
+
+```bash
+source .venv/bin/activate
+python -m unittest discover -s tests -v
+
+# Separate terminal: only one navigation controller at a time
+python -m src.navigation.navigation
+
+# Another terminal: receive and record independently (Ctrl+C or --duration)
+python -m src.localization.record --output recordings/run.csv --duration 60
+
+# After recording, open the plot (or export without a GUI)
+python -m src.localization.plot recordings/run.csv
+python -m src.localization.plot recordings/run.csv --output recordings/run.png --no-show
+```
+
+Gazebo server and GUI still start separately as in section 4. Press Run before
+expecting changing simulation timestamps. `README.md` contains the full startup
+procedure and environment recreation commands. A repeated `run.csv` command
+requires a new filename; omitting `--output` creates one automatically.
+
+Automated verification:
+
+- **48 tests pass**: 10 perception, 15 navigation, 21 localization/recording and
+  2 Matplotlib plot tests. The 46 non-plot tests need only the standard library;
+  none requires a running Gazebo instance. Plot tests skip if Matplotlib is absent.
+- Localization tests cover 0/+90/-90/180-degree headings, roll/pitch, normalized
+  and equivalent negative quaternions, model selection, timestamps, missing and
+  invalid data, sampling, in-place rotation, duplicate/reset times, final points,
+  CSV round-trip/rejection, mocked subscription/recovery/shutdown and overwrite
+  protection. Plot tests check coordinates, markers, heading, scale and PNG export.
+- The baseline had 23 tests with five failures caused by stale perception
+  expectations for the former 2.5-m threshold. These are now aligned with 1.0 m.
+
+Live verification and remaining manual checks:
+
+- Python successfully received the real model pose from the owner's existing
+  paused Gazebo instance. Repeated simulation timestamp 973.564 produced exactly
+  one CSV point, as intended; no commands were sent to that instance.
+- A separate server used the unmodified world/model and a dedicated Gazebo
+  Transport partition. The modified navigation ran there alongside the recorder.
+  A 25-second wall-clock run saved 123 points over 24.869 simulation seconds,
+  moving approximately 3.579 m along +X. All recorded poses were valid.
+- A second 18-second run saved 88 points over 17.785 simulation seconds, including
+  left-turn avoidance and resumed forward motion. Final heading was approximately
+  +94.6 degrees and final world position (4.135, 1.811) m. Command logs contained
+  137 forward and 33 turning decisions. A real Twist subscriber verified that
+  navigation shutdown published (linear.x=0, angular.z=0).
+- Real CSV files were loaded and rendered to PNG. The turn-run plot was visually
+  inspected for trajectory, start/end, units and final heading. A review copy is
+  in ignored `recordings/session3-validation.csv` and `.png`.
+- Both test navigation processes and the separate server exited normally. The
+  owner's server/GUI/controller were not restarted or controlled. The new lock
+  behavior is unit-tested; these short live runs are numerical checks, not a
+  complete visual collision or long-duration safety validation.
+
+The owner should still visually compare world position/heading with the GUI,
+inspect a longer recorded drive, and check close corners, pause/resume timeout
+and Ctrl+C stopping in their normal session. Unit tests and a short numerical
+live run do not prove collision freedom for arbitrary obstacle layouts.
 
 ### Existing simulation and raw-data test reference
 

@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Lokale Session-3-Pfadaufnahmen und Plots
+/recordings/

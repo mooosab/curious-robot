@@ -2,6 +2,7 @@
 
 import math
 import io
+import threading
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
@@ -112,6 +113,33 @@ class NavigationTests(unittest.TestCase):
         movement, _ = self.run_live_loop(scan, [10.0, 10.1])
         movement.move.assert_not_called()
         self.assertEqual(movement.stop.call_count, 3)
+
+    def test_terminal_output_never_holds_command_lock(self):
+        # Wenn stdout blockiert, muss die Timeout-Schleife den Lock bekommen.
+        for ranges in ([5.0] * 361, []):
+            command_lock = threading.Lock()
+
+            def check_output(*args, **kwargs):
+                acquired = command_lock.acquire(blocking=False)
+                self.assertTrue(acquired, "Terminalausgabe blockiert den Timeout-Lock")
+                if acquired:
+                    command_lock.release()
+
+            scan = SimpleNamespace(ranges=ranges, range_min=0.1, range_max=10,
+                                   angle_min=-math.pi, angle_step=math.pi / 180)
+            with self.subTest(valid=bool(ranges)), \
+                    patch("src.navigation.navigation.threading.Lock", return_value=command_lock), \
+                    patch("builtins.print", side_effect=check_output):
+                self.run_live_loop(scan, [10.0, 11.1])
+
+    def test_invalid_scan_values_preserve_turn_and_stop(self):
+        for invalid in (math.nan, -math.inf, 0, None):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(choose_motion(scan_results(left=invalid), "left"),
+                                 (0.0, 0.0, "left"))
+        # Nach zuverlässigen Daten dieselbe Richtung weiterfahren.
+        self.assertEqual(choose_motion(scan_results(0.9, 2, 4), "left"),
+                         (0.0, 0.5, "left"))
 
 
 if __name__ == "__main__":

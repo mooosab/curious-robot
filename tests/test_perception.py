@@ -13,8 +13,8 @@ from src.perception.test import lidar_callback
 class PerceptionTests(unittest.TestCase):
     def test_invalid_values_are_excluded(self):
         invalid = [math.nan, -math.inf, -1, 0, 0.09, 10.01, None, "1", True]
-        self.assertEqual(evaluate_sector(invalid + [1.2], 0.1, 10),
-                         (1.2, True, len(invalid)))
+        self.assertEqual(evaluate_sector(invalid + [0.8], 0.1, 10),
+                         (0.8, True, len(invalid)))
 
     def test_no_valid_values_is_unknown(self):
         for values in ([], [math.nan], [-math.inf, 0]):
@@ -31,10 +31,11 @@ class PerceptionTests(unittest.TestCase):
     def test_positive_infinity_means_no_return(self):
         self.assertEqual(evaluate_sector([math.inf] * 45, 0.1, 10),
                          (math.inf, False, 0))
-        self.assertEqual(evaluate_sector([math.inf, 1], 0.1, 10), (1, True, 0))
+        self.assertEqual(evaluate_sector([math.inf, 0.8], 0.1, 10), (0.8, True, 0))
 
     def test_threshold_and_sensor_boundaries(self):
-        for distance, expected in [(0.1, True), (2.49, True), (2.5, False), (10, False)]:
+        for distance, expected in [(0.1, True), (0.99, True), (1.0, False),
+                                   (1.01, False), (10, False)]:
             with self.subTest(distance=distance):
                 self.assertEqual(evaluate_sector([distance], 0.1, 10),
                                  (distance, expected, 0))
@@ -63,7 +64,7 @@ class PerceptionTests(unittest.TestCase):
 
     def test_wrong_metadata_is_rejected(self):
         for minimum, maximum in [(0, 10), (math.nan, 10), (0.1, math.inf),
-                                 (10, 0.1), (0.1, 2)]:
+                                 (10, 0.1), (0.1, 0.5)]:
             with self.subTest(minimum=minimum, maximum=maximum):
                 with self.assertRaises(ValueError):
                     analyze_scan([5] * 361, minimum, maximum)
@@ -86,7 +87,7 @@ class PerceptionTests(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             lidar_callback(message)
-            message.ranges = [1.0] * 361
+            message.ranges = [0.8] * 361
             lidar_callback(message)
         self.assertIn("Scan nicht auswertbar", output.getvalue())
         self.assertEqual(output.getvalue().count("| JA"), 8)

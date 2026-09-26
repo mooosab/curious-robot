@@ -42,7 +42,7 @@ def analyze_scan(ranges, range_min, range_max, angle_min=-math.pi,
         raise ValueError(f"361 Messwerte erwartet, {len(values)} erhalten")
     if not (math.isfinite(range_min) and math.isfinite(range_max)
             and 0 < range_min < OBSTACLE_DISTANCE <= range_max):
-        raise ValueError("Ungültige Sensorgrenzen für die 2.5-m-Hindernisschwelle")
+        raise ValueError(f"Ungültige Sensorgrenzen für die {OBSTACLE_DISTANCE:.1f}-m-Hindernisschwelle")
     # Feste Indizes passen nur zum Scan von -180 bis +180 Grad in 1-Grad-Schritten.
     if not (math.isclose(angle_min, -math.pi, abs_tol=1e-6)
             and math.isclose(angle_step, math.pi / 180, abs_tol=1e-6)):

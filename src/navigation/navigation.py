@@ -20,7 +20,7 @@ def choose_motion(results, turn_direction=None):
     """Liefert (Vorwärtsgeschwindigkeit, Drehgeschwindigkeit, Drehrichtung).
 
     Reine Entscheidung ohne Gazebo: dadurch mit Beispieldaten testbar.
-    Die Perception-Schwelle vorne bleibt bei 2.5 m.
+    Die vordere Hindernisschwelle kommt aus der Perception (aktuell 1.0 m).
     """
     front = results["Vorne"]
     left = results["Vorne-links"]
@@ -75,19 +75,20 @@ def main():
                 )
             except ValueError as error:
                 stop()
-                print(f"Stopp: Scan nicht auswertbar ({error})")
-                return
-
-            linear, angular, turn_direction = choose_motion(results, turn_direction)
-            move(linear, angular)
-            action = "STOPP" if linear == angular == 0 else (
-                "VORWÄRTS" if angular == 0 else f"DREHEN {turn_direction}"
-            )
-            print(
-                f"{action} | Vorne: {results['Vorne']['distance']} | "
-                f"Vorne-links: {results['Vorne-links']['distance']} | "
-                f"Vorne-rechts: {results['Vorne-rechts']['distance']}"
-            )
+                status = f"Stopp: Scan nicht auswertbar ({error})"
+            else:
+                linear, angular, turn_direction = choose_motion(results, turn_direction)
+                move(linear, angular)
+                action = "STOPP" if linear == angular == 0 else (
+                    "VORWÄRTS" if angular == 0 else f"DREHEN {turn_direction}"
+                )
+                status = (
+                    f"{action} | Vorne: {results['Vorne']['distance']} | "
+                    f"Vorne-links: {results['Vorne-links']['distance']} | "
+                    f"Vorne-rechts: {results['Vorne-rechts']['distance']}"
+                )
+        # Ein blockiertes Terminal darf den Timeout-Stopp nicht blockieren.
+        print(status)
 
     node = Node()
     try:
@@ -101,11 +102,12 @@ def main():
                 if last_scan_time is None or time.monotonic() - last_scan_time > SCAN_TIMEOUT:
                     stop()
     except KeyboardInterrupt:
-        print("\nNavigation wird beendet...")
+        pass
     finally:
         with command_lock:
             running = False
             stop()
+    print("\nNavigation beendet.")
 
 
 if __name__ == "__main__":

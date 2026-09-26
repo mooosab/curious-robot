@@ -15,13 +15,15 @@ Use it as the primary description of the current project state, architecture and
 
 The current milestone is:
 
-    Session 1 – Basic Simulation
+    Session 3 – Localization & Path Tracking
 
 Continue from the current state described in PROJECT_CONTEXT.md.
 
 The immediate next task is:
 
-    Add a simple caster / support to stabilize the differential-drive robot.
+    Review the completed Session-3 localization/path tracking implementation.
+    Preserve the working simulation and Session-2 navigation.
+    Stop for owner review before Session 4; do not merge into main.
 
 Do not jump ahead to AI, reinforcement learning, object recognition or personality systems.
 
@@ -89,7 +91,8 @@ Current main components:
 - left wheel joint
 - right wheel joint
 
-The next mechanical component is a caster / support.
+A passive caster/support, differential drive and LiDAR are already implemented.
+The owner has confirmed stable autonomous driving.
 
 
 ## Coding Guidelines
@@ -149,7 +152,7 @@ When implementing movement:
 
 Current feature branch:
 
-    feature/session-01-basic-simulation
+    feature/session-03-localization
 
 Keep commits focused and understandable.
 

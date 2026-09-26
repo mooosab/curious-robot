@@ -1,8 +1,9 @@
 # Curious Robot
 
 Gazebo Harmonic auf macOS: LiDAR-Perception, reaktive Navigation und
-Weltpose/Pfadaufzeichnung. Session 3 verwendet die echte Simulatorpose;
-SLAM, Mapping, Zielnavigation und ROS 2 sind nicht implementiert.
+Weltpose/Pfadaufzeichnung und persistente besuchte Zellen (Session 4).
+Die Localization verwendet die echte Simulatorpose;
+SLAM, Hinderniskarten, Zielnavigation und ROS 2 sind nicht implementiert.
 
 ## Starten
 
@@ -96,6 +97,56 @@ Der vorhandene SceneBroadcaster liefert `gz.msgs.Pose_V`. Verwendet wird der
 Eintrag `curious_robot`, dessen Pose in dieser Welt direkt im Weltrahmen liegt.
 Die Aufzeichnung ist unabhängig von LiDAR-Auswertung und Navigation.
 
+## Spatial Memory: besuchte Zellen
+
+Parallel zur Navigation in einem eigenen Terminal starten:
+
+```bash
+source .venv/bin/activate
+python -m src.memory.record
+```
+
+Der Prozess nutzt die bestehende Localization und sendet keine Fahrbefehle.
+Alle zwei Sekunden erscheinen Zellanzahl und Coverage. Ctrl+C speichert den
+aktuellen Stand in `data/spatial_memory.json`. Beim nächsten Start wird diese
+Datei automatisch geladen; eine fehlende Datei bedeutet ein neues leeres Memory.
+Die Navigation liest diese Datei nicht und fährt unverändert weiter.
+
+Optional 60 Sekunden laufen lassen und JSON prüfen:
+
+```bash
+python -m src.memory.record --duration 60
+python -m json.tool data/spatial_memory.json
+# Erneut starten: Die zuvor gespeicherten Zellen bleiben vorhanden.
+python -m src.memory.record --duration 10
+```
+
+Nur einen Memory-Prozess pro Datei starten. Für ein separates Experiment:
+
+```bash
+python -m src.memory.record --file data/experiment.json
+```
+
+Das Raster verwendet 0,5-m-Zellen und `floor(x / cell_size)` bzw.
+`floor(y / cell_size)`, auch für negative Koordinaten. Die Weltinnenflächen liegen
+bei ±4,9 m. Als halboffener Bereich `[-4.9, 4.9)` pro Achse schneidet das Rechteck
+400 Rasterzellen; teilweise enthaltene Randzellen zählen mit.
+Coverage ist `besuchte Zellen / 400`, ohne Abzug von Hindernissen oder Robotergröße.
+Eine besuchte Zelle sagt daher nichts über ihre vollständige Befahrbarkeit aus.
+
+JSON enthält Format/Version, Zellgröße, Grenzen und eindeutige Zellindizes.
+Speicherung erfolgt bei Änderungen alle fünf Sekunden und final beim Beenden,
+über eine temporäre Datei mit atomarem Ersetzen. Beschädigte Dateien oder
+abweichende Konfigurationen werden mit einer Fehlermeldung abgewiesen.
+`--cell-size`, `--bounds XMIN XMAX YMIN YMAX` und `--save-interval` sind optional;
+für eine andere Rasterkonfiguration eine separate Datei verwenden.
+
+Memory zählt empfangene Modellpositionen, keine Hindernisse oder sichtbaren
+Flächen. Es interpoliert keine Empfangslücken. Grenzrauschen kann Nachbarzellen
+markieren. Ein Simulationsreset behält die Besuche; für einen Neustart ohne alte
+Besuche einen neuen Dateinamen wählen. Bei hartem Abbruch können die noch nicht
+gespeicherten Besuche seit dem letzten Speicherintervall fehlen.
+
 ## Tests
 
 Ohne laufendes Gazebo:
@@ -112,7 +163,7 @@ python -m unittest discover -s tests -p 'test_localization*.py' -v
 python -m unittest discover -s tests -p 'test_navigation.py' -v
 ```
 
-48 Tests; die zwei Plot-Tests werden ohne Matplotlib übersprungen. Die übrigen
+78 Tests; die zwei Plot-Tests werden ohne Matplotlib übersprungen. Die übrigen
 Tests benötigen nur die Python-Standardbibliothek und simulieren Transportdaten.
 
 Zur manuellen Prüfung: Pfad und Heading mit der GUI vergleichen, eine längere

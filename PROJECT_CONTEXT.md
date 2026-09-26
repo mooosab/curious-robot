@@ -61,7 +61,7 @@ Current:
 - Git / GitHub
 - Gazebo Harmonic
 - SDF
-- Python for LiDAR perception, reactive navigation and world-pose/path tracking
+- Python for LiDAR perception, reactive navigation, localization and visited-cell memory
 - Matplotlib for offline trajectory plots
 - working Python bindings for `gz.transport13` and `gz.msgs10` (confirmed by the owner)
 
@@ -70,7 +70,7 @@ Planned:
 - ROS 2 if appropriate
 - computer vision
 - pretrained vision embeddings
-- persistent memory
+- semantic / episodic memory
 - active learning
 - reinforcement learning later
 
@@ -104,7 +104,7 @@ Before starting Gazebo, the resource path is currently set using:
 
 Current development branch:
 
-    feature/session-03-localization
+    feature/session-04-spatial-memory
 
 Development should happen incrementally on feature branches.
 
@@ -144,20 +144,28 @@ Current relevant structure:
     │   │   ├── lidar.py
     │   │   └── test.py
     │   ├── memory/
+    │   │   ├── __init__.py
+    │   │   ├── spatial.py
+    │   │   └── record.py
     │   └── brain/
     │
     ├── config/
     └── tests/
         ├── test_localization.py
         ├── test_localization_plot.py
+        ├── test_memory_record.py
+        ├── test_spatial_memory.py
         ├── test_navigation.py
         └── test_perception.py
 
 `src/perception/test.py` displays live LiDAR data. Navigation and movement are
 implemented in `src/navigation/`; localization records the simulator's model pose
-independently in `src/localization/`. `memory`, `brain` and `config` remain empty.
+independently in `src/localization/`. `src/memory/` receives that localization
+through a separate subscriber and stores visited cells. `brain` and `config`
+remain empty. Navigation does not import or consult Spatial Memory.
 Tests use `unittest`; the two plot tests use Matplotlib and skip if it is absent.
-Local `.venv/` and generated `recordings/` CSV/images are ignored by Git.
+Local `.venv/`, generated `recordings/` CSV/images and `data/*.json` memory
+files (including temporary save files) are ignored by Git.
 
 
 ## 7. Current Simulation World
@@ -266,30 +274,29 @@ Opposite wheel velocities:
 
 ## 10. Current Development Session
 
-    Session 3 – Localization & Path Tracking
+    Session 4 – Spatial Memory / Visited Cells
 
-Sessions 1 (simulation/perception) and 2 (reactive navigation) are complete.
-The owner confirms that autonomous driving works stably in Gazebo.
-Session 3 adds simulator ground-truth x/y/yaw, sampled CSV recording and an
-offline Matplotlib trajectory plot. It does not estimate pose from LiDAR or
-wheel odometry. Localization and navigation run as separate processes.
+- Session 1: Simulation + Perception.
+- Session 2: Safe Navigation (reactive avoidance, with documented limitations).
+- Session 3: Localization + Path Tracking using the simulator's world pose.
+- Session 4: Visited Cells, geometric coverage and JSON persistence.
 
-Stop after Session 3 for owner review. Do not add mapping, SLAM, destination
-navigation, path planning, Brain, Memory, AI or ROS 2. Do not merge into main.
+Spatial Memory runs separately and consumes the existing localization. It has
+no influence on movement decisions. Stop after Session 4 for owner review.
+Do not add SLAM, occupancy/obstacle mapping, path planning, goal navigation,
+frontier exploration, curiosity behavior, AI, cameras or ROS 2. Do not merge main.
 
 
-## 11. Session 3 Definition of Done
+## 11. Session 4 Definition of Done
 
-Implemented and verified:
+1. Use Session-3 localization to receive the robot's world position.
+2. Assign positions to fixed 0.5-m cells, including negative coordinates.
+3. Track unique visited cells and geometric coverage within known world bounds.
+4. Save/load human-readable JSON without silently accepting invalid configuration.
+5. Run an independent subscriber with periodic dirty saves and final shutdown save.
+6. Preserve all Session-1–3 behavior and pass the full test suite.
 
-1. Receive the existing Gazebo model world pose from Python.
-2. Extract x/y and quaternion-derived yaw with tested conventions.
-3. Record sampled `(timestamp, x, y, yaw)` independently of navigation.
-4. Plot the trajectory with start/end points and final heading.
-5. Review navigation and make only a targeted safety fix.
-6. Run all perception, navigation, localization and plot tests successfully.
-
-Live checks and remaining manual checks are described in section 13.
+Implementation details, test results and live verification are in section 13.
 
 
 ## 12. Completed
@@ -317,7 +324,8 @@ Session 1 and Session 2 are complete, including eight-sector perception,
 invalid-measurement handling and reactive navigation. Stable autonomous driving
 is confirmed by the owner. The 1.0-m threshold is now reflected in all tests and
 code descriptions. Session 3 adds working world-pose reception, sampling, CSV
-recording and plotting. Brain and Memory have not been started; ROS 2 is not used.
+recording and plotting. Session 4 adds persistent visited-cell Spatial Memory.
+Brain, semantic/episodic memory and ROS 2 remain unimplemented.
 
 
 ## 13. Current Implementation and Validation
@@ -581,7 +589,7 @@ requires a new filename; omitting `--output` creates one automatically.
 
 Automated verification:
 
-- **48 tests pass**: 10 perception, 15 navigation, 21 localization/recording and
+- Session-3 validation: **48 tests passed**: 10 perception, 15 navigation, 21 localization/recording and
   2 Matplotlib plot tests. The 46 non-plot tests need only the standard library;
   none requires a running Gazebo instance. Plot tests skip if Matplotlib is absent.
 - Localization tests cover 0/+90/-90/180-degree headings, roll/pitch, normalized
@@ -618,6 +626,151 @@ The owner should still visually compare world position/heading with the GUI,
 inspect a longer recorded drive, and check close corners, pause/resume timeout
 and Ctrl+C stopping in their normal session. Unit tests and a short numerical
 live run do not prove collision freedom for arbitrary obstacle layouts.
+
+### Session 4: Spatial Memory / Visited Cells
+
+Architecture (no changes to existing localization, perception or navigation):
+
+    Gazebo Pose_V -> localization.extract_model_pose() -> Pose2D.x/y
+        -> SpatialMemory.visit() -> set of unique grid cells -> JSON
+
+`src/memory/spatial.py` contains the pure, Gazebo-independent `SpatialMemory`.
+`src/memory/record.py` subscribes separately, reusing `extract_model_pose` and
+Session 3's `POSE_TOPIC` constant. There is no second pose parser, quaternion
+conversion or coordinate system. Navigation neither imports this module nor
+reads the memory file. No new dependency was installed for Session 4.
+
+Grid configuration and coverage:
+
+- Default cell size: **0.5 m × 0.5 m**, defined once in `spatial.py`.
+- `cell_x = floor(x / cell_size)`, `cell_y = floor(y / cell_size)`.
+  The grid origin is world (0, 0). Examples: (-0.1, 0.1) -> (-1, 0),
+  (-0.5, 0.5) -> (-1, 1). Truncation toward zero would be wrong for negatives.
+- `basic_world.sdf` has wall centers at +/-5 m and wall thickness 0.2 m.
+  Interior faces are +/-4.9 m, so the interior rectangle is **9.8 × 9.8 m**.
+  Default bounds are `(xmin, xmax, ymin, ymax) = (-4.9, 4.9, -4.9, 4.9)`.
+- Lower bounds are inclusive, upper bounds exclusive: `xmin <= x < xmax`,
+  `ymin <= y < ymax`. Out-of-bounds positions are rejected rather than clamped.
+- `total_cells` counts all origin-aligned grid cells intersecting this rectangle,
+  including partial edge cells: indices -10 through 9 on each axis, **400 cells**.
+  Partial edge cells count once, just like interior cells; this is a cell-count
+  metric, not an area-weighted floor-coverage percentage.
+- `coverage = count / total_cells`, always in [0, 1]. Obstacles and robot footprint
+  are not subtracted. Thus 100% may be physically unreachable.
+- Cell size and bounds are configurable at construction and via runner CLI.
+  Public configuration properties and the `visited_cells` frozenset are read-only.
+
+Small API:
+
+```python
+from src.memory.spatial import SpatialMemory
+
+memory = SpatialMemory.load("data/spatial_memory.json")  # absent -> empty
+memory.world_to_cell(-0.1, 0.1)  # (-1, 0)
+memory.visit(-0.1, 0.1)         # True only for a newly visited cell
+memory.was_visited(-0.2, 0.2)   # True
+memory.visit_cell(2, 3)
+memory.was_cell_visited(2, 3)
+print(memory.count, memory.total_cells, memory.coverage)
+memory.save("data/spatial_memory.json")
+```
+
+Persistence format (example, not preloaded demo data):
+
+```json
+{
+  "format": "curious-robot-visited-cells",
+  "version": 1,
+  "cell_size": 0.5,
+  "bounds": [-4.9, 4.9, -4.9, 4.9],
+  "visited_cells": [[-1, 0], [2, 3]]
+}
+```
+
+- Default path: `data/spatial_memory.json`, relative to the repository root.
+- `load()` returns a new object. Missing files yield an empty memory without
+  creating a file. Invalid JSON, duplicate fields/cells, unsupported versions,
+  noninteger/out-of-grid cells and invalid configuration raise a visible error.
+- Saved cell size/bounds must match the requested configuration. For a custom
+  file, pass the same configuration to `load()` or the CLI; existing cells are
+  never silently reinterpreted. Loading errors do not overwrite the file.
+- `save()` writes sorted cells to a temporary file in the target directory,
+  flushes/fsyncs and atomically replaces the destination. A failed replacement
+  leaves the old JSON intact and removes the temporary file.
+- Only one writer per memory file is supported. Different worlds/experiments
+  should use separate files; equal bounds do not establish world identity.
+
+Live use (Gazebo server/GUI started separately as in section 4; press Run):
+
+```bash
+# Separate terminal, parallel to the existing navigation process
+source .venv/bin/activate
+python -m src.memory.record
+
+# Optional bounded run or separate experiment file
+python -m src.memory.record --file data/experiment.json --duration 60
+
+# Inspect persistent data, then run the same command again to resume
+python -m json.tool data/spatial_memory.json
+```
+
+Each valid received model pose marks its current cell, including poses with a
+repeated or reset simulation timestamp. Repeated visits cause no duplicates.
+Invalid/out-of-bounds poses are counted and skipped. Missing model entries are
+ignored. Status is printed every two wall-clock seconds: unique cells, coverage,
+reception age/waiting state and rejected-pose count. No per-pose terminal spam.
+
+Disk saves occur at most every five wall-clock seconds (`--save-interval`), only
+when new cells have appeared or a new memory file needs initialization. Ctrl+C
+or `--duration` expiry saves pending changes and unsubscribes. If no pose arrives,
+the runner reports that explicitly and preserves previously visited cells.
+Stopping Memory does not stop Navigation. Hard termination may lose unsaved
+recent visits; no multi-process merging or database is implemented.
+
+Known limitations: visits refer to the model origin, not the full robot footprint
+or LiDAR-visible area. Cells between missing pose messages are not interpolated.
+Position jitter at a cell boundary can mark adjacent cells. A world reset retains
+visits intentionally; choose a new file for a fresh experiment. Neither obstacles,
+free space, reachability nor exploration targets are inferred from this set.
+
+Session-4 verification:
+
+- **78 tests pass**, including all 48 existing tests and 30 new tests (21 grid/JSON
+  and 9 runner tests). The two existing Matplotlib tests skip if it is absent;
+  all other tests use the standard library and need no running Gazebo.
+- Tests cover positive/negative coordinates, same/different cells, duplicates,
+  direct cell operations, immutable public configuration, coverage up to 100%,
+  partial/exact boundaries, invalid data, custom configuration, JSON round-trip,
+  missing/corrupt/incompatible files, atomic-save failure, mocked live reception,
+  periodic dirty saves, Ctrl+C persistence, restart, stale callbacks, reset times,
+  failed subscriptions and invalid intervals. A test compares the default bounds
+  with the actual SDF wall collision geometry.
+- Run all tests: `python -m unittest discover -s tests -v`.
+- Run only Session 4: `python -m unittest discover -s tests -p 'test_*memory*.py' -v`.
+
+Live validation (separate Gazebo Transport partition, unmodified basic_world):
+
+- A fresh server ran with the existing navigation while Memory recorded poses.
+  The initial 15-second run saved six cells (1.50% coverage).
+- Restarting the Memory process on the same JSON loaded all six cells, then
+  extended the set to eight cells (2.00%) during a further six seconds of driving.
+  JSON inspection confirmed that every previous cell remained present. Both
+  Memory runs and the navigation process exited with code 0.
+- A separate real Ctrl+C test interrupted Memory before the five-second periodic
+  save. No file existed before the signal; shutdown wrote the current visited
+  cell and exited with code 0.
+- Gazebo initially printed multicast "No route to host" warnings, but topic
+  discovery and Python reception subsequently worked without environment changes.
+  All test processes were stopped; normal user simulation sessions were untouched.
+- Tests used temporary JSON files, not the user's default memory. No preset
+  visited cells were added to the repository. Startup jitter near world y=0 marked
+  both adjacent rows, illustrating the documented boundary-noise limitation.
+
+Manual follow-up: run Memory alongside one navigation controller, observe count
+and coverage, Ctrl+C only Memory, inspect the JSON, then restart it with the same
+file and verify the initial loaded count. Continue driving to observe additions.
+This verifies persistence; it does not validate collision avoidance or coverage
+of physically unreachable cells.
 
 ### Existing simulation and raw-data test reference
 

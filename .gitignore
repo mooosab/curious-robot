@@ -219,3 +219,7 @@ __marimo__/
 
 # Lokale Session-3-Pfadaufnahmen und Plots
 /recordings/
+
+# Lokal gespeicherte Spatial Memories (inklusive temporärer Schreibdateien)
+/data/*.json
+/data/*.json.*.tmp

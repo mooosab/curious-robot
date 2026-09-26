@@ -15,15 +15,15 @@ Use it as the primary description of the current project state, architecture and
 
 The current milestone is:
 
-    Session 3 – Localization & Path Tracking
+    Session 4 – Spatial Memory / Visited Cells
 
 Continue from the current state described in PROJECT_CONTEXT.md.
 
 The immediate next task is:
 
-    Review the completed Session-3 localization/path tracking implementation.
+    Review the completed Session-4 visited-cell memory implementation.
     Preserve the working simulation and Session-2 navigation.
-    Stop for owner review before Session 4; do not merge into main.
+    Stop for owner review before Session 5; do not merge into main.
 
 Do not jump ahead to AI, reinforcement learning, object recognition or personality systems.
 
@@ -95,6 +95,14 @@ A passive caster/support, differential drive and LiDAR are already implemented.
 The owner has confirmed stable autonomous driving.
 
 
+## Spatial Memory Boundary
+
+Spatial Memory reuses the existing Localization pose extraction and runs in a
+separate process. Navigation must not read Memory or use visited cells to select
+movement unless the owner explicitly requests a later development session.
+Visited cells are not an occupancy map or a proof of free space.
+
+
 ## Coding Guidelines
 
 For Python:
@@ -152,7 +160,7 @@ When implementing movement:
 
 Current feature branch:
 
-    feature/session-03-localization
+    feature/session-04-spatial-memory
 
 Keep commits focused and understandable.
 

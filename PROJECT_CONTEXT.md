@@ -104,7 +104,7 @@ Before starting Gazebo, the resource path is currently set using:
 
 Current development branch:
 
-    feature/session-04-spatial-memory
+    feature/session-05-exploration
 
 Development should happen incrementally on feature branches.
 
@@ -131,6 +131,10 @@ Current relevant structure:
     │           └── model.sdf
     │
     ├── src/
+    │   ├── exploration/
+    │   │   ├── __init__.py
+    │   │   ├── basic.py
+    │   │   └── explore.py
     │   ├── localization/
     │   │   ├── __init__.py
     │   │   ├── pose.py
@@ -151,6 +155,8 @@ Current relevant structure:
     │
     ├── config/
     └── tests/
+        ├── test_exploration.py
+        ├── test_exploration_live.py
         ├── test_localization.py
         ├── test_localization_plot.py
         ├── test_memory_record.py
@@ -162,7 +168,9 @@ Current relevant structure:
 implemented in `src/navigation/`; localization records the simulator's model pose
 independently in `src/localization/`. `src/memory/` receives that localization
 through a separate subscriber and stores visited cells. `brain` and `config`
-remain empty. Navigation does not import or consult Spatial Memory.
+remain empty. The original navigation module does not consult Spatial Memory.
+The Session-5 runner reuses its Safety decision, then selects local directions
+using Localization and Memory. Only one driving controller may run at a time.
 Tests use `unittest`; the two plot tests use Matplotlib and skip if it is absent.
 Local `.venv/`, generated `recordings/` CSV/images and `data/*.json` memory
 files (including temporary save files) are ignored by Git.
@@ -274,27 +282,32 @@ Opposite wheel velocities:
 
 ## 10. Current Development Session
 
-    Session 4 – Spatial Memory / Visited Cells
+    Session 5 – Basic Exploration
 
 - Session 1: Simulation + Perception.
 - Session 2: Safe Navigation (reactive avoidance, with documented limitations).
 - Session 3: Localization + Path Tracking using the simulator's world pose.
 - Session 4: Visited Cells, geometric coverage and JSON persistence.
+- Session 5: Local, deterministic preference for unknown cells among allowed
+  directions; Safety always has priority.
 
-Spatial Memory runs separately and consumes the existing localization. It has
-no influence on movement decisions. Stop after Session 4 for owner review.
-Do not add SLAM, occupancy/obstacle mapping, path planning, goal navigation,
-frontier exploration, curiosity behavior, AI, cameras or ROS 2. Do not merge main.
+Exploration runs as the single driving controller and single writer of its
+Memory file. Do not run `navigation.py` or `memory.record` alongside it on the
+same robot/file. The independent path recorder may run alongside Exploration.
+Stop after Session 5 for owner review. Do not add SLAM, occupancy mapping,
+obstacle maps, global goals/planning, frontier exploration, cameras, semantic
+memory, RL or other AI. Do not merge main.
 
 
-## 11. Session 4 Definition of Done
+## 11. Session 5 Definition of Done
 
-1. Use Session-3 localization to receive the robot's world position.
-2. Assign positions to fixed 0.5-m cells, including negative coordinates.
-3. Track unique visited cells and geometric coverage within known world bounds.
-4. Save/load human-readable JSON without silently accepting invalid configuration.
-5. Run an independent subscriber with periodic dirty saves and final shutdown save.
-6. Preserve all Session-1–3 behavior and pass the full test suite.
+1. Reuse Session-2 Safety, Session-3 localization and Session-4 persistence.
+2. Score a few local candidate directions using unique unvisited cells.
+3. Keep obstacle/invalid-data/timeout/shutdown handling ahead of Exploration.
+4. Update and persist visited cells during driving, with periodic Coverage output.
+5. Use a single controller; retain deterministic choices and turn state.
+6. Pass all existing tests plus new Exploration and runner tests.
+7. Record honest live-test results and known limitations.
 
 Implementation details, test results and live verification are in section 13.
 
@@ -325,7 +338,9 @@ invalid-measurement handling and reactive navigation. Stable autonomous driving
 is confirmed by the owner. The 1.0-m threshold is now reflected in all tests and
 code descriptions. Session 3 adds working world-pose reception, sampling, CSV
 recording and plotting. Session 4 adds persistent visited-cell Spatial Memory.
-Brain, semantic/episodic memory and ROS 2 remain unimplemented.
+Session 5 adds Basic Exploration without changing the existing perception,
+navigation, localization or memory modules. Brain, semantic/episodic memory
+and ROS 2 remain unimplemented.
 
 
 ## 13. Current Implementation and Validation
@@ -700,7 +715,9 @@ Persistence format (example, not preloaded demo data):
 - Only one writer per memory file is supported. Different worlds/experiments
   should use separate files; equal bounds do not establish world identity.
 
-Live use (Gazebo server/GUI started separately as in section 4; press Run):
+Standalone Memory use with the original reactive controller only (do not also
+write the Exploration controller's file). Gazebo server/GUI start separately as
+in section 4; press Run:
 
 ```bash
 # Separate terminal, parallel to the existing navigation process
@@ -735,7 +752,7 @@ free space, reachability nor exploration targets are inferred from this set.
 
 Session-4 verification:
 
-- **78 tests pass**, including all 48 existing tests and 30 new tests (21 grid/JSON
+- Session-4 validation: **78 tests passed**, including all 48 existing tests and 30 new tests (21 grid/JSON
   and 9 runner tests). The two existing Matplotlib tests skip if it is absent;
   all other tests use the standard library and need no running Gazebo.
 - Tests cover positive/negative coordinates, same/different cells, duplicates,
@@ -771,6 +788,179 @@ and coverage, Ctrl+C only Memory, inspect the JSON, then restart it with the sam
 file and verify the initial loaded count. Continue driving to observe additions.
 This verifies persistence; it does not validate collision avoidance or coverage
 of physically unreachable cells.
+
+### Session 5: Basic Exploration
+
+Architecture:
+
+    LiDAR -> existing analyze_scan -> existing choose_motion (Safety first)
+    Pose_V -> existing extract_model_pose -> current x/y/yaw
+    x/y -> existing SpatialMemory.visit -> persistent visited cells
+    Safety + Pose + Memory -> BasicExplorer -> existing movement.move
+
+`src/exploration/basic.py` contains pure geometry/scoring and a small stateful
+`BasicExplorer`. `src/exploration/explore.py` is the single driving runner.
+No existing production module or old test was changed for Session 5. No package
+was installed. Session-4 JSON version 1 and its binary visited/unvisited set remain
+unchanged; there are no visit counts or rewards.
+
+Local scoring, configured centrally in `basic.py`:
+
+- Candidate relative headings: **0°, +45°, -45°**, aligned with the front and
+  front-diagonal LiDAR sectors. No global search or distant goal selection.
+- Lookahead distances: **0.5, 1.0, 1.5 m** from the model origin.
+- `angle = normalize(yaw + relative_angle)` into [-pi, pi).
+  `x_target = x + d*cos(angle)`, `y_target = y + d*sin(angle)`.
+  Trigonometric round-off near exact cardinal axes is snapped to zero before
+  projection, preventing `sin(pi)` residue from assigning the wrong grid row.
+- Convert targets using the existing `world_to_cell`. Stop at the configured
+  world boundary; deduplicate cells and exclude the robot's current cell.
+- Do not score beyond an observed obstacle: only distances satisfying
+  `d + 0.45 <= candidate_sector_min_range` are used. The 0.45-m margin covers
+  approximately 0.325-m model footprint radius plus the 0.125-m LiDAR offset.
+- **Score = number of distinct unvisited retained cells**. Visited cells score 0.
+  Memory is not treated as evidence of free space. No distance weights/randomness.
+- Highest score wins. Equal scores prefer straight, then left, then right.
+  With no positive novelty gain, no voluntary turn is introduced. During a
+  necessary Safety maneuver, a known allowed side may still be selected.
+
+Safety and state:
+
+- Each command first calls the unchanged `choose_motion()`. Its 1.0-m front
+  threshold, 0.6-m diagonal entry threshold, 1.3/0.8-m release hysteresis,
+  0.15-m/s forward speed and +/-0.5-rad/s rotation remain in effect.
+- Voluntary candidate headings require valid center/adjacent sectors and the
+  stricter existing release distances: center >=1.3 m, adjacent sectors >=0.8 m.
+- Every rotation additionally requires **all eight sectors valid and >=0.70 m**.
+  This conservative guard is specific to the new runner. The chassis's maximum
+  radius around the wheel axle is `hypot(0.35,0.20)=0.403 m`; the LiDAR is 0.225 m
+  from that axle. Their sum is 0.628 m; 0.70 m adds reserve. This may stop the
+  robot in tight places where the old controller would continue turning.
+- Once obstacle avoidance begins, its chosen direction is retained until the
+  original hysteresis releases it. Memory can choose a side only at the start
+  of the maneuver, among allowed candidates. If there is no candidate, the old
+  in-place avoidance direction is used only if the all-around guard permits it;
+  otherwise Stop. Exploration never introduces forward motion during avoidance.
+- A voluntary turn stores a short heading target (not a position goal), rotates
+  in place and retains it until within **5°**. Safety may interrupt it at any time.
+  The target sector and all-around clearance are rechecked during the turn.
+- Reconsider voluntary direction after **0.5 m** of position progress. This lets
+  the robot enter new cells instead of endlessly rescoring while stationary.
+  After avoidance/turn completion it also gets this short forward commitment,
+  always subject to fresh Safety checks. A 0.5-m forward projection must remain
+  within Memory bounds; otherwise choose an allowed turn or Stop.
+
+Runner data freshness and concurrency:
+
+- `ExplorationSession` holds sensor state, Memory and command state under one lock.
+  Both callbacks and commands use it; shutdown disables late callbacks.
+- A separate control thread runs every **0.1 wall-clock seconds**. It stops if
+  either sensor is absent/invalid, Scan age >1 s, Pose age >1 s, or the difference
+  between their simulation timestamps exceeds **0.25 s**. Repeated timestamps
+  do not renew reception freshness. Pausing the simulation therefore stops motion.
+- Backward timestamps stop the controller with an error; restart it after resetting
+  Gazebo. Unlike the passive Session-4 recorder, a driving controller must not
+  retain old heading decisions across a reset.
+- JSON saves and status prints are outside the command lock and control thread.
+  A snapshot is saved every five wall-clock seconds only if the visited count
+  changed. Newer visits remain eligible for the next save. Shutdown stops first,
+  then unsubscribes and saves any remaining visits.
+- Callback parsing errors invalidate cached data; unexpected control-thread errors
+  stop movement and are surfaced by the runner. Initial/shutdown commands are zero.
+- Existing JSON is loaded before startup; corruption/configuration mismatch fails
+  visibly without replacing the file. Only one process may write that file.
+
+Usage (from repository root; server and GUI still start separately):
+
+```bash
+source .venv/bin/activate
+# First stop the old navigation controller and any Memory writer with Ctrl+C.
+python -m src.exploration.explore
+
+# Separate experiment file and bounded simulation duration (plus wall-clock cap)
+python -m src.exploration.explore --file data/exploration_trial.json --sim-duration 60 --duration 120
+
+# Inspect saved visits; restart with the same file to retain knowledge.
+python -m json.tool data/exploration_trial.json
+```
+
+The default file remains `data/spatial_memory.json`. `--cell-size` and `--bounds`
+must match a pre-existing file. `--sim-duration` measures from the first received
+pose, `--duration` is wall-clock time. Status every two seconds shows elapsed
+simulation time, visited-cell count, Coverage and current decision reason.
+The standalone Memory recorder is unnecessary while Exploration runs.
+The old `python -m src.navigation.navigation` remains available as an alternative,
+never as a parallel controller. To compare, use fresh identical start worlds and
+separate initially identical memory files; report equal simulation durations.
+
+Testing:
+
+- **118 tests pass**: all 78 existing tests unchanged, plus 24 pure Exploration
+  and 16 session/runner tests. The existing two Matplotlib tests remain optional.
+- New tests cover projection/wrapping/cardinal and negative coordinates, bounds,
+  deduplication, unseen/partially seen/known scores, deterministic ties, Memory
+  changing a repeated route, blocked unknown versus allowed known directions,
+  no-return/invalid data, hysteresis/direction retention, target commitment,
+  side/rear rotation clearance, timeouts, repeated/mismatched/reset timestamps,
+  Memory updates/snapshots, loading/saving, Ctrl+C/late callbacks and bad files.
+- Run: `python -m unittest discover -s tests -v`.
+- Exploration only: `python -m unittest discover -s tests -p 'test_exploration*.py' -v`.
+
+Live verification used real Gazebo physics and transport in separate partitions.
+World/model repository files were untouched. Temporary world copies changed only
+spawn poses for targeted checks; no test object positions were saved in the repo.
+
+- A first integrated run completed 60.0 simulation seconds and saved 20 cells
+  (5.00%). An independent Session-3 path recorder captured the driven trajectory.
+- Comparison from the same start pose and empty memory used the same passive
+  pose observer for both controllers. Pose streams were trimmed to a nominal
+  60-second window from their first observation (last samples at 59.985 and
+  59.999 seconds due to topic sampling):
+
+  | Controller | Visited cells | Coverage |
+  |---|---:|---:|
+  | Existing reactive navigation | 18 | 4.50% |
+  | Basic Exploration | 20 | 5.00% |
+
+  This single comparison includes startup waiting for both controllers and is
+  only a sanity check. It is not proof of generally better coverage or fewer loops.
+- Approximately 10-s trials started near a wall (3.7, 0, yaw 0), a corner
+  (3.6, 3.6, yaw pi/4), the red box (0.25, 2, yaw 0), and a close front-diagonal
+  green box (0.15, -0.6, yaw 0). Wall/corner/box trials drove/turned; the close
+  diagonal trial deliberately stayed stopped under the rotation-clearance guard.
+- At received poses, projected chassis/wheel/support bounding rectangles were
+  checked against world wall/box rectangles. No overlaps were detected. Minimum
+  projected separations were approximately 0.609 m (wall), 0.624 m (corner),
+  0.357 m (box) and 0.300 m (stopped diagonal case). The comparison runs also
+  showed no projected overlap (reactive minimum 0.407 m; Exploration 0.610 m).
+  This is sampled planar geometry validation, not force/contact-sensor evidence
+  or a guarantee for all obstacles, dynamics and simulator timings.
+- A restart from the initial pose loaded the first run's actual 20-cell JSON.
+  All 20 cells remained present. Within the short repeat trial the controller
+  turned left to about +42.5 degrees, reaching approximately (0.907, 0.456) m;
+  the fresh-memory run initially continued straight. It had not yet entered a
+  new cell by the repeat's end, so coverage stayed 5.00%. The comparison therefore
+  demonstrates changed behavior from retained knowledge, not immediate gain.
+- All test controllers exited with code 0 after normal duration expiry or SIGINT.
+  Real Twist subscribers saw final (0,0) commands in the comparison and targeted
+  trials. All test servers/controllers were stopped afterwards. No user's default
+  JSON was overwritten. Unit tests additionally cover missing/invalid/old sensors.
+
+Owner follow-up: visually check a longer drive, pause/resume and Ctrl+C, close
+corners/diagonals, and restart with the same Memory file. Run no competing
+controller or writer. Tight-clearance stops are expected, and there is no
+automatic escape maneuver. Full safety over arbitrary layouts is not established.
+
+Limitations: this remains a local heuristic, not collision-free path planning.
+A sector minimum and a planar LiDAR cannot certify all 3D swept geometry or
+moving obstacles. The conservative rotation guard can leave the robot stopped
+near walls/diagonals. No escape/reversing planner is added. When all nearby cells
+are known, deterministic reactive routes/loops may persist. Boundary jitter,
+missing pose samples and unreachable cells retain Session 4's limitations.
+Coverage does not prove obstacle-free or physically complete exploration.
+Only one controller/writer is an operating requirement; legacy scripts do not
+share a cross-process lock. A force-killed/frozen process or broken transport
+still cannot guarantee a final Stop command in the simulator.
 
 ### Existing simulation and raw-data test reference
 

@@ -15,15 +15,15 @@ Use it as the primary description of the current project state, architecture and
 
 The current milestone is:
 
-    Session 4 – Spatial Memory / Visited Cells
+    Session 5 – Basic Exploration
 
 Continue from the current state described in PROJECT_CONTEXT.md.
 
 The immediate next task is:
 
-    Review the completed Session-4 visited-cell memory implementation.
+    Review the completed Session-5 local Exploration implementation.
     Preserve the working simulation and Session-2 navigation.
-    Stop for owner review before Session 5; do not merge into main.
+    Stop for owner review before Session 6; do not merge into main.
 
 Do not jump ahead to AI, reinforcement learning, object recognition or personality systems.
 
@@ -95,11 +95,14 @@ A passive caster/support, differential drive and LiDAR are already implemented.
 The owner has confirmed stable autonomous driving.
 
 
-## Spatial Memory Boundary
+## Exploration and Spatial Memory Boundary
 
-Spatial Memory reuses the existing Localization pose extraction and runs in a
-separate process. Navigation must not read Memory or use visited cells to select
-movement unless the owner explicitly requests a later development session.
+Exploration reuses existing Perception, Localization, Safety Navigation and
+Spatial Memory. Safety always has priority over novelty. Keep exploration logic
+in src/exploration; do not turn the Safety module into a global planner.
+Run exactly one driving controller per robot and one writer per Memory file.
+The Exploration runner replaces the standalone navigation controller and Memory
+recorder while active. The independent path recorder may run alongside it.
 Visited cells are not an occupancy map or a proof of free space.
 
 
@@ -160,7 +163,7 @@ When implementing movement:
 
 Current feature branch:
 
-    feature/session-04-spatial-memory
+    feature/session-05-exploration
 
 Keep commits focused and understandable.
 

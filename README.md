@@ -1,7 +1,7 @@
 # Curious Robot
 
 Gazebo Harmonic auf macOS: LiDAR-Perception, reaktive Navigation und
-Weltpose/Pfadaufzeichnung und persistente besuchte Zellen (Session 4).
+Weltpose/Pfadaufzeichnung, persistente besuchte Zellen und lokale Exploration (Session 5).
 Die Localization verwendet die echte Simulatorpose;
 SLAM, Hinderniskarten, Zielnavigation und ROS 2 sind nicht implementiert.
 
@@ -99,7 +99,8 @@ Die Aufzeichnung ist unabhängig von LiDAR-Auswertung und Navigation.
 
 ## Spatial Memory: besuchte Zellen
 
-Parallel zur Navigation in einem eigenen Terminal starten:
+Für die ursprüngliche reaktive Navigation: in einem eigenen Terminal starten.
+**Bei Exploration nicht zusätzlich auf dieselbe Memory-Datei schreiben.**
 
 ```bash
 source .venv/bin/activate
@@ -110,7 +111,8 @@ Der Prozess nutzt die bestehende Localization und sendet keine Fahrbefehle.
 Alle zwei Sekunden erscheinen Zellanzahl und Coverage. Ctrl+C speichert den
 aktuellen Stand in `data/spatial_memory.json`. Beim nächsten Start wird diese
 Datei automatisch geladen; eine fehlende Datei bedeutet ein neues leeres Memory.
-Die Navigation liest diese Datei nicht und fährt unverändert weiter.
+Die ursprüngliche Navigation liest diese Datei nicht. Der neue Exploration-Runner
+verwendet und speichert Memory selbst; dafür ist dieser Recorder nicht nötig.
 
 Optional 60 Sekunden laufen lassen und JSON prüfen:
 
@@ -147,6 +149,52 @@ markieren. Ein Simulationsreset behält die Besuche; für einen Neustart ohne al
 Besuche einen neuen Dateinamen wählen. Bei hartem Abbruch können die noch nicht
 gespeicherten Besuche seit dem letzten Speicherintervall fehlen.
 
+## Basic Exploration (Session 5)
+
+**Nur einen Fahrcontroller betreiben.** Vor dem Start `src.navigation.navigation`
+mit Ctrl+C beenden. Ebenso einen laufenden Memory-Recorder für dieselbe Datei
+beenden. Exploration übernimmt Fahrbefehle und Memory-Speicherung selbst.
+Der unabhängige Localization-Pfadrecorder darf parallel weiterlaufen.
+
+Bei laufendem Gazebo mit **Run**:
+
+```bash
+source .venv/bin/activate
+python -m src.exploration.explore
+```
+
+Unbekannte Zellen werden unter den zulässigen lokalen Richtungen bevorzugt:
+0° und ±45°, mit Lookahead 0,5/1,0/1,5 m. Jede unterschiedliche unbesuchte
+Lookahead-Zelle gibt einen Punkt. Gleichstand: geradeaus, links, rechts.
+Die Bewertung endet vor Hindernissen und Weltgrenzen. Visited Cells sagen
+nichts über Befahrbarkeit aus; LiDAR/Safety haben immer Vorrang.
+
+Drehungen erfolgen auf der Stelle, mit zusätzlicher Prüfung aller acht Sektoren
+auf mindestens 0,70 m Freiraum. Die bisherige Safety-Funktion mit 1-m-Schwelle,
+Hysterese und gehaltener Ausweichrichtung bleibt erhalten. Bei fehlenden/alten
+Scans oder Posen wird gestoppt. Ein Gazebo-Zeitreset verlangt einen Controller-Neustart.
+
+Alle zwei Sekunden werden Coverage und Status ausgegeben. Standarddatei ist
+weiterhin `data/spatial_memory.json`: beim Start laden, bei Änderungen alle fünf
+Sekunden speichern. Ctrl+C stoppt zuerst den Roboter und speichert anschließend.
+
+Ein eigener Versuch, 60 Simulationssekunden ab erster Pose, maximal 120 reale Sekunden:
+
+```bash
+python -m src.exploration.explore --file data/exploration_trial.json --sim-duration 60 --duration 120
+python -m json.tool data/exploration_trial.json
+# Derselbe Dateiname lädt bereits besuchte Zellen beim nächsten Lauf.
+python -m src.exploration.explore --file data/exploration_trial.json
+```
+
+Zur manuellen Prüfung: freie Fahrt, Wand/Box/Ecke und nahe Diagonalen beobachten;
+Pause/Resume und Ctrl+C-Stopp prüfen; gespeicherte Zellen nach Neustart vergleichen.
+Für einen Coverage-Vergleich gleiche Startpose, gleiche Simulationsdauer und
+separate, anfangs identische Memory-Dateien verwenden. Eine einzelne Fahrt beweist
+keinen allgemeinen Vorteil. Enge Bereiche können zum konservativen Stopp führen;
+bei überall bekannten Nachbarzellen bleiben lokale Schleifen möglich. Globale
+Ziele, Fluchtplanung, Hinderniskarten und weitere Sensoren sind nicht implementiert.
+
 ## Tests
 
 Ohne laufendes Gazebo:
@@ -163,7 +211,7 @@ python -m unittest discover -s tests -p 'test_localization*.py' -v
 python -m unittest discover -s tests -p 'test_navigation.py' -v
 ```
 
-78 Tests; die zwei Plot-Tests werden ohne Matplotlib übersprungen. Die übrigen
+118 Tests; die zwei Plot-Tests werden ohne Matplotlib übersprungen. Die übrigen
 Tests benötigen nur die Python-Standardbibliothek und simulieren Transportdaten.
 
 Zur manuellen Prüfung: Pfad und Heading mit der GUI vergleichen, eine längere

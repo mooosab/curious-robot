@@ -3,7 +3,7 @@
 import math
 
 
-OBSTACLE_DISTANCE = 2.5
+OBSTACLE_DISTANCE = 1
 
 
 def evaluate_sector(values, range_min, range_max):

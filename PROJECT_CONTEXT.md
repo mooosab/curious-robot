@@ -131,6 +131,8 @@ Current relevant structure:
     │
     ├── src/
     │   ├── navigation/
+    │   │   ├── navigation.py
+    │   │   └── movement.py
     │   ├── perception/
     │   │   ├── lidar.py
     │   │   └── test.py
@@ -139,13 +141,13 @@ Current relevant structure:
     │
     ├── config/
     └── tests/
+        ├── test_navigation.py
         └── test_perception.py
 
 `src/perception/test.py` is the current LiDAR reception experiment.
-The `navigation`, `memory`, and `brain` directories exist but are empty;
-`config` is also empty. `tests/test_perception.py` contains standard-library
-unit tests for perception. No Python navigation, Brain or Memory implementation
-has been started.
+The owner has added `src/navigation/navigation.py` and `movement.py` for basic
+reactive driving. `memory`, `brain` and `config` remain empty. Tests cover both
+perception and navigation with the standard-library `unittest` framework.
 
 
 ## 7. Current Simulation World
@@ -262,8 +264,8 @@ The purpose of Session 1 is ONLY to establish the physical robot and basic auton
 
 The simulation hardware is working. Python perception now evaluates eight
 angular sectors, handles invalid measurements and displays obstacle status.
-The current focus is understanding and manually checking this tested perception
-code. Autonomous navigation remains a later, unstarted step.
+The owner has started basic reactive navigation. The current focus is correcting
+and manually checking its obstacle-response logic while retaining working perception.
 
 Do NOT add:
 
@@ -314,9 +316,12 @@ Session 1 status: world working, stable robot working, differential drive workin
 LiDAR working, and Python LiDAR subscription and conversion to a list working.
 The owner has confirmed reception through the Python bindings. Perception now
 computes minimum distances and obstacle status for eight angular sectors, handles
-invalid measurements, and has ten passing unit tests; see section 13.
-Python navigation and autonomous obstacle avoidance have not been started.
-Brain and Memory have not been started. ROS 2 is not in use.
+invalid measurements, and has ten unit tests. Their earlier successful run used
+the former 2.5-m threshold; some expectations still need adjustment for the current
+1.0-m threshold. See section 13.
+Basic Python reactive navigation has been started and its decision logic corrected.
+Reliable autonomous roaming has not yet been confirmed in a live test. Brain and
+Memory have not been started. ROS 2 is not in use.
 
 
 ## 13. NEXT STEP
@@ -332,7 +337,9 @@ The code is split into two small modules:
   The callback passes sensor range limits and horizontal angle metadata to the
   evaluator. Invalid scans produce an explicit unknown-status message.
 
-The existing sector boundaries and strict obstacle threshold of 2.5 m are preserved:
+The owner changed `OBSTACLE_DISTANCE` in `src/perception/lidar.py` from 2.5 to
+1.0 m. This is the shared threshold used by the perception status for every sector
+and by navigation for the front sector. The existing sector boundaries are unchanged:
 
 | Sector | Python slice(s) |
 |---|---|
@@ -355,10 +362,10 @@ Measurement handling:
 - Positive infinity means no return within range, not a measured finite distance.
 - NaN, negative infinity, zero, negative values, out-of-range values and nonnumeric
   entries are excluded and counted per sector.
-- A valid distance below 2.5 m produces `JA`, even with other invalid values.
+- A valid distance below 1.0 m produces `JA`, even with other invalid values.
 - Without a detected near obstacle, invalid/missing sector values produce
   `UNBEKANNT` rather than a false clear indication.
-- Fully valid sectors without a near obstacle produce `NEIN`. At exactly 2.5 m,
+- Fully valid sectors without a near obstacle produce `NEIN`. At exactly 1.0 m,
   the strict threshold does not classify the return as a near obstacle.
 - Missing distances display `--`; all-no-return sectors display `kein Treffer`.
 - Scans must have 361 samples and the expected -pi start / one-degree step.
@@ -416,19 +423,81 @@ python3 -m unittest discover -s tests -v
 Ten tests cover invalid values, missing data, infinity, sensor and obstacle
 boundaries, all sector edges including the rear wrap, invalid scan metadata,
 output formatting and callback recovery. These are synthetic-data tests; the
-last execution passed all ten tests (`Ran 10 tests ... OK`). They verify the
+earlier execution passed all ten tests with the former 2.5-m threshold. Some
+assertions still assume that threshold, so this is not a passing-test claim for
+the current 1.0-m setting. Tests were not rerun during this documentation update.
+They verify the
 processing logic, not the live transport connection or simulator behavior. The
 refactored live subscriber has not been revalidated against a running simulation.
 The `python3` interpreter in the editing shell could not import `gz` during the
 import check (`ModuleNotFoundError`). Use the owner's existing Python environment
 with the working Gazebo bindings for live reception; no dependencies were installed.
 
-### Next steps — not implemented
+### Current navigation and next manual test
 
-Review the perception output manually with the running simulation before adding
-further behavior. Python navigation, autonomous obstacle avoidance, Brain and
-Memory remain unstarted. No movement commands, ROS 2, dependencies or simulation
-changes were introduced by the perception restructuring.
+The owner introduced `src/navigation/navigation.py` and `movement.py`.
+The original decision logic moved forward while turning toward a blocked front,
+reset its turn direction immediately when the front cleared, and then accelerated
+to 0.4 m/s. It did not reliably check invalid diagonal measurements, catch scan
+validation failures or stop on missing scans.
+
+The corrected `choose_motion()` function is independent of Gazebo and returns
+linear speed, angular speed and the retained turn direction:
+
+- Normal forward speed is 0.15 m/s.
+- A front distance strictly below 1.0 m starts avoidance.
+- A diagonal distance below 0.6 m also blocks forward motion.
+- The initially more open front diagonal determines the turn direction; ties go
+  right. That direction is retained throughout the maneuver.
+- Avoidance rotates in place at +/-0.5 rad/s, with zero forward speed.
+- Forward motion resumes only at front distance >= 1.3 m and both front diagonals
+  >= 0.8 m. These separate entry/exit thresholds reduce repeated switching.
+- Unknown or partially invalid data in the three front sectors causes a stop.
+- Scan validation failures send Stop. A timeout check also sends Stop after more
+  than one second of wall-clock time without a scan (checked every 0.1 s).
+- Startup and shutdown send Stop. A lock serializes callback and timeout commands;
+  callbacks arriving after shutdown cannot restart movement.
+
+`main()` owns the live subscriber. Importing the navigation module no longer
+starts a controller. Existing movement helpers in `movement.py` are unchanged.
+The navigation imports `OBSTACLE_DISTANCE` from `src/perception/lidar.py`.
+`FRONT_CLEAR_DISTANCE = OBSTACLE_DISTANCE + 0.3` therefore now evaluates to 1.3 m.
+The diagonal constants remain `DIAGONAL_STOP_DISTANCE = 0.6` and
+`DIAGONAL_CLEAR_DISTANCE = 0.8` in `src/navigation/navigation.py`.
+Distances refer to the smallest valid scanner-to-surface range in each sector.
+Restart the Python controller after editing these constants; Gazebo does not need
+restarting for this Python-only change. The simulation and dependencies are unchanged.
+
+Start from the repository root in the owner's working Gazebo Python environment:
+
+```bash
+python3 -m src.navigation.navigation
+```
+
+Run only one navigation process and avoid concurrent manual velocity publishers
+while testing. With Gazebo running, observe forward motion, in-place avoidance,
+a consistent turn direction, then resumed forward motion. Ctrl+C sends Stop.
+
+Before the owner changed the threshold, all 22 unit tests passed: 10 perception
+and 12 navigation tests. Some tests now retain outdated 2.5/2.8-m expectations
+and must be updated before the suite can validate the 1.0/1.3-m setting. The
+`choose_motion()` docstring and the sensor-limit error text also still mention
+2.5 m; those texts do not determine behavior and were not changed in this
+documentation-only update. Navigation tests
+cover the decision transitions, diagonal obstacles, unknown measurements, scan
+errors, timeout and shutdown, using synthetic scans and a mocked transport.
+No live driving verification of the corrected controller has been performed.
+The default editing-shell Python lacks `gz`; a separate Homebrew Python import
+check found the transport bindings but lacked `google.protobuf`. No dependencies
+were installed or environment configuration changed.
+
+This remains a simple reactive experiment, not a complete collision-free planner.
+It does not check the entire swept robot footprint during rotation or solve
+trapped/corner situations. The 0.6/0.8-m diagonal margins are initial tuning values
+for manual verification. Next steps are to adapt the threshold-dependent tests
+and stale code descriptions, then verify the current settings with a live driving
+test. These steps are pending, not performed by this documentation update. Brain,
+Memory, mapping, SLAM and ROS 2 remain unimplemented.
 
 ### Existing simulation and raw-data test reference
 
